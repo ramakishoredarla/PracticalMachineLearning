@@ -1,0 +1,153 @@
+---
+title: A case study on "Prediction of how was Exercise Performed"
+---
+
+---
+subtitle: Project Description
+---
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we will use data recorded from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+More information is available from the website http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of this project is to predict the manner in which the participants did the exercise. This is the classe variable of the training set, which classifies the correct and incorrect outcomes into A, B, C, D, and E categories. This report describes how the model for the project was built, its cross validation, expected out of sample error calculation, and the choices made. It was used successfully to accurately predict all 20 different test cases on the Coursera website.
+
+---
+subtitle: Initial Data preparation
+---
+For this analysis, two data sets are used which are downloaded from the above mentioned source.
+
+```{r}
+#Data loading
+setwd("D:/Corsera/Practical Machine Learning/Data")
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing  <- read.csv("pml-testing.csv",  na.strings = c("NA", "#DIV/0!", ""))
+```
+
+Take a quick look at the data and particulars of variables and classe the variable which we need to pridict.
+```{r, echo=FALSE}
+str(training)
+```
+Let's display the number of observations by class and proportion of observations by class. This can be done by using the following code. 
+```{r,echo=FALSE}
+table(training$classe)
+prop.table(table(training$classe))
+```
+---
+subtitle: Data cleaning
+---
+After executing the str on the training dataset, we can observer there are variables with "NA" values which we can't use in our analysis. Let's identify those variables and remove from the analysis. Also, columns  1 to 6 are time based variables and are not important to the analysis.
+```{r,echo=FALSE}
+training <- training[, 7:160]
+testing  <- testing[, 7:160]
+is_data  <- apply(!is.na(training), 2, sum) > 19621  
+training <- training[, is_data]
+testing  <- testing[, is_data]
+```
+Let's check the dimensions of both the datasets.
+```{r,echo=FALSE}
+dim(training)
+dim(testing)
+```
+---
+subtitle: Data Partition
+---
+Now create the data partions using training dataset. split the training data into development sample of 60% which we use for actual model building and the remaining 40% as for the testing purpose.  
+```{r,echo=FALSE}
+library(caret)
+set.seed(3141592)
+inTrain <- createDataPartition(y=training$classe, p=0.60, list=FALSE)
+train1  <- training[inTrain,]
+train2  <- training[-inTrain,]
+dim(train1)
+dim(train2)
+```
+Now, train1 is the training data set (it contains 11,776 observations, or about 60% of the entire training data set), and train2 is the testing data set (it contains 7,846 observations, or about 40% of the entire training data set). 
+The train2 dataset will  be used only for accuracy measurement of the model.
+
+Identify the "zero covariates"" from train1 and train2 and remove these "zero covariates"" from both train1 and train2:
+```{r,echo=FALSE}
+nzv_cols <- nearZeroVar(train1)
+if(length(nzv_cols) > 0) {
+  train1 <- train1[, -nzv_cols]
+  train2 <- train2[, -nzv_cols]
+}
+dim(train1)
+dim(train2)
+```
+The above step does not any change to both train1 and train2 data sets as we already removed the variables/covariates with NA values in previous steps. 
+
+---
+subtitle: Data Treatment
+---
+Now we are having 53 predictors or covariates, by using dimentanlity reduction we are going to reduce the number of covrariates to a reasonable number which we can use in the model development. 
+
+```{r,echo=FALSE}
+library(randomForest)
+set.seed(3141592)
+fitModel <- randomForest(classe~., data=train1, importance=TRUE, ntree=100)
+varImpPlot(fitModel)
+```
+Using the Accuracy and Gini graphs above, we select the top 10 variables that we'll use for model building. If the accuracy of the resulting model is acceptable, limiting the number of variables is a good idea to ensure readability and interpretability of the model. A model with 10 parameters is certainly much more user friendly than a model with 53 parameters.
+
+Our 10 covariates are: yaw_belt, roll_belt, num_window, pitch_belt, magnet_dumbbell_y, magnet_dumbbell_z, pitch_forearm, accel_dumbbell_y, roll_arm, and roll_forearm.
+
+Let's analyze the correlations between these 10 variables. The following code calculates the correlation matrix, replaces the 1s in the diagonal with 0s, and outputs which variables have an absolute value correlation above 75%:
+```{r,echo=FALSE}
+correl = cor(train1[,c("yaw_belt","roll_belt","num_window","pitch_belt","magnet_dumbbell_z","magnet_dumbbell_y","pitch_forearm","accel_dumbbell_y","roll_arm","roll_forearm")])
+diag(correl) <- 0
+which(abs(correl)>0.75, arr.ind=TRUE)
+```
+These two variable roll_belt and yaw_belt have very high correlation among themselves and it can be testing by using below code. Finally, we are keeping the variabel roll_belt in the model.
+```{r,echo=FALSE}
+cor(train1$roll_belt, train1$yaw_belt)
+```
+---
+subtitile: Modeling development
+---
+Now by using a Random Forest algorithm, using the train() function from the caret package. Use the final 9 variables out of the 53 as model parameters. These variables were among the most significant variables generated by an initial Random Forest algorithm, and are roll_belt, num_window, pitch_belt, magnet_dumbbell_y, magnet_dumbbell_z, pitch_forearm, accel_dumbbell_y, roll_arm, and roll_forearm. These variable are relatively independent as the maximum correlation among them is 0.50.
+
+By using a 2-fold cross-validation control we are going to measure the. This is the simplest k-fold cross-validation possible and it will give a reduced computation time. Because the data set is large, using a small number of folds is justified.
+
+```{r,echo=FALSE}
+set.seed(3141592)
+fitModel <- train(classe~roll_belt+num_window+pitch_belt+magnet_dumbbell_y+magnet_dumbbell_z+pitch_forearm+accel_dumbbell_y+roll_arm+roll_forearm,
+                  data=train1,
+                  method="rf",
+                  trControl=trainControl(method="cv",number=2),
+                  prox=TRUE,
+                  verbose=TRUE,
+                  allowParallel=TRUE)
+```
+Since this step takes little while in executing the output and this model might be required in further steps so we can save this data by using following code. 
+```{r,echo=FALSE}
+saveRDS(fitModel, "modelRF.Rds")
+```
+We can use this model specifications in future whenever it is required by calling the below r commands.
+```{r,echo=FALSE}
+fitModel <- readRDS("modelRF.Rds")
+```
+---
+subtitle: Test the accuary of the model on the 40% holdout sample or train2 dataset
+---
+By using the confusion matrix command from caret package to test the accuracy. 
+```{r,echo=FALSE}
+predictions <- predict(fitModel, newdata=train2)
+confusionMat <- confusionMatrix(predictions, train2$classe)
+confusionMat
+```
+From the above output it is very evident that the model have an accuracy of 
+99.77% and is a very good accuracy.
+---
+subtitle: Out of time validation of the model
+---
+Now we are going to validate the model by using the actual testing dataset provided in the website for the exercise. 
+```{r,echo=FALSE}
+missClass = function(values, predicted) {
+  sum(predicted != values) / length(values)
+}
+OOS_errRate = missClass(train2$classe, predictions)
+OOS_errRate
+```
+The out-of-sample error rate is 0.23%.
